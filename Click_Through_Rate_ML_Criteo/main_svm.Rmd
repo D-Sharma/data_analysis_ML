@@ -1,0 +1,164 @@
+---
+title: "Machine Learning Project: Click Through Rate"
+author: "Ankesh Tyagi           : tyagi.ankesh@gmail.com
+         Arafat Gabareen Mokhtar: gamo.arafat@gmail.com
+         Dimple Sharma          : dimple.narang@gmail.com
+         Rodrigo Zuniga         : rodrigozuniga@gmail.com
+         Vaibhav chaudhary      : chvaibhav79@hotmail.com"
+date: "November 10, 2014"
+output: html_document
+---
+
+```{r, echo=FALSE}
+rm(list=ls())
+library(e1071)
+
+```
+
+
+## ====Support Vector Machine (SVM) ===
+## 1. Pre-process data 
+```{r, echo=TRUE}
+file='./data/train_wo_NAs.txt'
+data <- read.table(file=file, header = T, stringsAsFactors = T, sep = '\t',
+                   na.strings=c("", "NA"))
+ddd <- na.omit(data)
+vari <- c('V1','V2','V3','V4','V5','V6','V7','V8','V9','V10',
+          'V11','V12','V14', 'V20', 'V23', 'V31', 'V34', 'V36')
+ddd <- ddd[,vari]
+#Create a clean dataset, by removing incomplete columns
+ddd$V1 <- as.factor(ddd$V1)
+dim(data)
+dim(ddd)
+
+```
+
+---
+
+## 2. Create train and test dataset 
+
+```{r, echo=TRUE}
+n1 <- as.integer(nrow(ddd) * (2/3))
+n2 <- as.integer(nrow(ddd))
+train <- ddd[1:n1,]
+n1 <- n1+1
+test  <- ddd[n1:n2,]
+set.seed(pi)
+dim(train)
+dim(test)
+
+```
+
+
+---
+
+## 3. Fit SVM model
+
+```{r, echo=TRUE}
+# Create a model using SVM
+fit = svm(V1~ ., data=train)
+#Make predictions and calculate the error rate
+Yhat <- predict(fit, newdata = test[,-1])
+Yhat <- Yhat
+pred  <- sum(Yhat == test$V1)/length(test$V1)   # Calcuate the correct predictions
+err <- 1 - pred                               # Calcualte Error rate (1- correct predictions)
+print(paste0('SVM Test Error Rate: ',round(err,4)))
+table(pred = Yhat, true = test$V1)
+```
+
+
+---
+
+## SVM Summary
+
+```{r, echo=TRUE}
+summary(fit)
+```
+
+---
+
+## 4. Tune SVM
+
+```{r, echo=TRUE}
+#Tune SVM paraments, both gamma and cost, to choose a model with lowest error rate
+fit_tune <- tune(svm, V1~., data = train,
+                ranges = list(gamma = seq(5,7,1), cost = seq(1,3,1)),
+                tunecontrol = tune.control(sampling = "cross"))
+
+
+```
+
+---
+
+## SVM tune summary
+
+```{r, echo=TRUE}
+
+summary(fit_tune)
+
+```
+
+
+---
+
+## SVM tunning Plot 
+```{r, echo=TRUE}
+plot(fit_tune)
+```
+
+---
+
+## Best parameters
+```{r, echo=TRUE}
+
+params <- fit_tune$best.parameters
+print(paste0("The best parameters for SVM are gamma ", params$gamma, " and cost ", params$cost))
+```
+
+
+---
+
+## 5. Best parameters SVM model
+
+```{r, echo=TRUE}
+#Create new SVM model using the best parameters for gamma and cost
+bestfit <- svm(V1~., data=train, gamma = params$gamma, cost = params$cost)
+summary(bestfit)
+```
+
+---
+
+## Make Predictions 
+```{r, echo=TRUE}
+#Make predictions
+best_Yhat <- predict(bestfit, newdata = test[,-1])
+best_pred  <- sum(best_Yhat == test$V1)/length(test$V1)   # Calcuate the correct predictions
+best_err <- 1 - best_pred                               # Calcualte Error rate (1- correct predictions)
+print(paste0('Best SVM Model Test Error: ',round(best_err,4)))
+Yhat <- Yhat
+```
+
+---
+
+```{r, echo=TRUE}
+table(pred = best_Yhat, true = test$V1)
+
+```
+
+---
+
+```{r, echo=TRUE}
+
+# SMV plot of the data
+plot(bestfit, train, V2 ~ V3, slice = list(V4 = 28, V5 = 9))
+```
+
+---
+
+```{r, echo=TRUE}
+plot(x=test$V2, y = test$V1, xlab="V2", ylab = "Y predict", pch = 19)
+points(x=test$V2, y = Yhat, col='red', pch = 20)
+points(x=test$V2, y = best_Yhat, col='blue', pch = 21)
+legend('bottomright', title='Outputs', c('Y values','Y predict','Y predict best svm'), 
+       col=c('black','red','blue'), pch=c(19,20,21))
+```

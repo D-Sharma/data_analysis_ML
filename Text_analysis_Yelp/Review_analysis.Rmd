@@ -1,0 +1,264 @@
+---
+title: "Data analysis, predict star ratings from user reviews for yelp dataset"
+author: "Dimple Sharma"
+date: "Friday, December 12, 2014"
+output: pdf_document
+---
+
+# Load and analyze yelp business dataset
+Here we load and analyze yelp business dataset
+
+```{r}
+#setwd("C:/Dimple/RStats/")
+#rm(list=ls())
+
+library(dplyr)
+library(ggplot2)
+
+# Load the yelp business dataset from a csv file
+business_data_all <- read.csv("datayelp/yelp_academic_dataset_business.csv", 
+                    header = T, stringsAsFactors = F, na.strings = c("","NA"))
+
+# Analyze the yelp business dataset
+dim(business_data_all)
+colnames(business_data_all)
+
+# Get sample data
+head(business_data_all, 3)
+tail(business_data_all, 3)
+summary(business_data_all)
+
+# We are interested in few columns
+business_colnames <- c("business_id", "name", "categories", "type","stars",
+                       "review_count", "city" ,"state" ,"latitude", 
+                       "longitude", "neighborhoods")
+# Get only the columns which will be used for analysis
+business_data_all <- business_data_all[, business_colnames]
+business_data <- filter(business_data_all, grepl("AZ|NV|WI", state))
+
+# Remove large objects for memory efficiency
+rm(business_data_all)
+
+# A histogram of review counts gives the skewness of the data. Here the data is skewed the right hence the data is positively skewed.
+hist(business_data$review_count, breaks = 400)
+
+# Following is a choropleth graph which shows the number of review counts by state.
+library(ggmap)
+# Get number of review for each state
+
+# box plot of review count vs states
+boxplot(business_data$review_count ~ business_data$state)
+# box plot of stars vs states
+boxplot(business_data$stars ~ business_data$state)
+
+
+
+#Get a base map ready
+world_map <- borders("world", colour = "grey10", fill = "grey10")
+
+# 1. Maps data frame
+states_map <- map_data("state")
+
+# 2. Data frame with plotting values
+#state.name <- c("Arizona", "Nevda", "Wisconson")
+#review_count <- c(100,200,300)
+state_name <- tolower(state.name)
+state_name <- as.character(state_name)
+review_count <- rep(0,50)
+data <- data.frame(state_name, review_count)
+
+# Get total review count for the three states
+review_by_state <- aggregate( review_count ~ state, data = business_data, FUN = sum)
+
+data[data$state_name %in% c("arizona"), 2] <- review_by_state[review_by_state == "AZ", 2]
+data[data$state_name %in% c("nevada"), 2] <- review_by_state[review_by_state == "NV", 2]
+data[data$state_name %in% c("wisconsin"), 2] <- review_by_state[review_by_state == "WI", 2]
+
+#col = c("#EDF8B1", "#1D91C0", "#225EA8", "#5A005A")
+mapcolours <- c("#F1EEF6", "#D4B9DA", "#C994C7", "#DF65B0", "#DD1C77", "#980043")
+mp <- ggplot(data, aes(map_id = state_name)) + geom_map(aes(fill = review_count), color = "white", map=states_map)
+mp <- mp + expand_limits(x = states_map$long, y = states_map$lat)
+mp <- mp + scale_fill_gradientn(colours = mapcolours, limits=c(0,max(data$review_count)))
+mp
+
+
+
+# Bubble chart of review count, stars, and state
+data_review_stars_state <- aggregate(review_count ~ state + stars, data=business_data, FUN = sum)
+# Bubble chart using ggplot
+gph_state_stars <- ggplot(data_review_stars_state, aes(x=state, y=stars, size=review_count, label=review_count), guide=FALSE)
+gph_state_stars <- gph_state_stars + geom_point(colour="white", fill="red", shape=21)+ scale_size_area(max_size = 15) 
+gph_state_stars <- gph_state_stars + scale_x_discrete (name="State") 
+gph_state_stars <- gph_state_stars + scale_y_continuous(name="Star rating", limits=c(0,max(data_review_stars_state$stars)))
+gph_state_stars <- gph_state_stars + geom_text(size = 4) + theme_bw()
+gph_state_stars
+
+
+
+```
+
+
+# Get categories of business
+
+```{r}
+# Business categories in business dataset
+business_categories <- unlist(lapply(business_data$categories, FUN = function(x) 
+                         strsplit(x, ",")))
+names(business_categories) <- NULL
+
+# Split categoreis and remove punctuations and blanks
+business_categories <- gsub("u\'", "\'", business_categories)
+business_categories <- gsub("[[:punct:]]", "", business_categories)
+business_categories <- gsub("[[:blank:]]", "", business_categories)
+head(business_categories, 10)
+
+categories <- unique(business_categories)
+n_cat <- length(categories)
+paste("The dataset contains ", n_cat, " unique categories")
+
+```
+
+`r categories`
+
+# Linear regression analysis
+
+```{r}
+col_classes <- c(rep("NULL",3),"numeric","character", 
+                 rep("numeric",2), rep("NULL",2), rep("numeric",2))
+
+review_data <- read.csv("datayelp/yelp_academic_dataset_review.csv",
+               colClasses = col_classes,
+               header = T, stringsAsFactors = F)
+
+# Summerize the sentiment score and user votes in a new dataset
+# 
+business_review <- review_data %>% 
+                   group_by(business_id) %>%
+                   summarise( total_score = sum(scores), 
+                              avg_score = mean(scores), 
+                              min_score = min(scores), 
+                              max_score = max(scores),
+                              total_votes_cool = sum(votes.cool), 
+                              total_votes_funny = sum(votes.funny), 
+                              total_votes_useful = sum(votes.useful))
+
+data <- select(business_data, business_id, review_count, stars)
+
+# Left outer join yelp business data with user reviews for business
+data2 <- merge(data, business_review, by.x = "business_id", by.y = "business_id", 
+               all.x = TRUE)
+
+summary(data2)
+
+# After merging two dataset we can see that some business do not have 
+# sentiment score and votes so we will remove those business from the analysis
+data_analyze <- na.omit(data2)
+
+# Final data with sentiment score, votes, and review count.
+dim(data_analyze)
+
+summary(data_analyze)
+
+cor_variable <- cor(data_analyze[,-1])
+
+library(reshape2)
+library(ggplot2)
+cor_data <- melt(cor_variable)
+
+cor_heatmap <- ggplot(data = cor_data, aes(x = Var1, y = Var2, fill = value)) 
+cor_heatmap <- cor_heatmap + geom_tile()
+cor_heatmap
+
+
+```
+
+```{r}
+
+ggplot(data_analyze, aes(x=review_count, y=stars)) +
+    geom_point(shape=1) +    # Use hollow circles
+    labs(title="Reviews for business", x = "Review count", y = "Star rating")
+    #geom_smooth(method=lm,   # Add linear regression line
+    #            se=FALSE) 
+
+ggplot(data_analyze, aes(x=total_score, y=stars)) +
+    geom_point(shape=1) +    # Use hollow circles
+    labs(title="User reviews sentiment score for business", x = "Sentiment score", 
+         y = "Star rating")
+
+#boxplot(data_analyze[,c(8,9,10)], las = 2)
+#boxplot(data_analyze[,c(2,4)], las = 2)
+#boxplot(data_analyze[,-1], las = 2)
+
+```
+
+
+# Linear regression with sentiment score, review count, and votes
+We create a multiple linear regression model with review counts, total score, total votes funny, total votes cool, total votes useful.
+
+```{r}
+# select columns
+data_analyze_2 <- select(data_analyze, stars, review_count, total_score, total_votes_funny,
+                        total_votes_cool, total_votes_useful)
+
+# Create linear regression model
+fit5 <- lm( stars ~ ., data = data_analyze_2)
+summary(fit5)
+plot(fit5)
+
+# Does the varibales have an impact on star ratings.
+aov_model5 <- aov( stars ~ . , data_analyze_2)
+aov_model5
+summary(aov_model5)
+
+```
+
+
+# Multiple Linear regression with multiple variables
+
+This linear regression modeling includes more features that can make better predictions.
+This model will quantify a relationship between a star rating and predictor variables which will include  total review counts, total sentiment score, average sentiment score, minimum sentiment score, maximum sentiment score, number of cool votes, number of funny votes, and number of useful votes.
+
+```{r}
+# Create a linear regression model which will include multiple predictors such as 
+# total review counts, total sentiment score, average sentiment score, minimum sentiment score, maximum
+# sentiment score, number of cool votes, number of funny votes, and number of useful votes
+fit <- lm(stars ~ ., data = data_analyze[, -1])
+summary(fit)
+plot(fit)
+
+# Check if the coefficients are significant
+aov_model1 <- aov( stars ~ . , data_analyze[,-1])
+aov_model1
+
+summary(aov_model1)
+
+```
+
+
+# Multiple Regression with subset
+
+We create a third model that will take a subset of the data, we find a fit for a regression with subset of the data. In this model we take a subset of the data to focus on business that have 100 or more reviews. 
+
+This model will quantify a relationship between a star rating and predictor variables which will include  total review counts, total sentiment score, average sentiment score, minimum sentiment score, maximum sentiment score, number of cool votes, number of funny votes, and number of useful votes.
+
+```{r}
+# There are many business that have less review.
+summary(data_analyze$review_count)
+
+# We focus only on business that have 100 or more review
+# The second model, use the same columns to predict rating for businesses  
+# that have more than 100 reviews.
+fit2 <- lm(stars ~ ., data = data_analyze[data_analyze$review_count > 100, -c( 1)])
+summary(fit2)
+plot(fit2)
+
+# Check how significant are the coefficients?
+aov_model2 <- aov( stars ~ . , data_analyze[data_analyze$review_count > 100,-c( 1)])
+aov_model2
+
+summary(aov_model2)
+
+```
+
+
+

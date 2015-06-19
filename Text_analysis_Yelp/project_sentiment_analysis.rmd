@@ -1,0 +1,157 @@
+---
+title: "Data analysis, yelp dataset sentiment analysis"
+author: "Dimple Sharma"
+date: "Friday, December 12, 2014"
+output: pdf_document
+---
+
+This analysis provides Sentiment analysis of user reviews for the business. The sentiment analysis will involve following steps:
+  *  A list of words categorized by sentiments
+  *  A function which estimates sentiment score
+  *  Sentiment analysis of user reviews
+  *  What are the review counts for business? Is there a trend
+
+# Get both positive and negative words list for opinion mining
+
+For opinion text analysis, we need a source that categorises words by sentiments.
+
+Hu and Lius have a list of approximately 6800 positive and negative words categorized by sentiment which is also called opinion lexicon. The opinion lexicon list had been used in many research for sentiment analysis. The list is available on Bing Lui's website : Bing Liu's web site: http://www.cs.uic.edu/~liub/FBS/opinion-lexicon-English.rar
+
+
+```{r}
+
+#setwd("c:/Dimple/RStats/")
+#rm(list=ls())
+
+hu_liu_pos <- scan('datayelp/opinion-lexicon-English/positive-words.txt', 
+                  what='character', comment.char=';')
+
+hu_liu_neg <- scan('datayelp/opinion-lexicon-English/negative-words.txt', 
+                  what='character', comment.char=';')
+
+```
+
+# Estimate sentiment score for each review
+This function estimates a sentiment score for reviews.
+
+The sentiment score function is written by Jeffrey Breen in an article which analyze twitter data: http://www.inside-r.org/howto/mining-twitter-airline-consumer-sentiment
+
+The score sentiment function is modified to use for user review sentiment analysis.
+
+```{r}
+library(plyr)
+library(stringr)
+
+score.sentiment = function(reviews, pos.words, neg.words, .progress='none')
+{
+        # Parameters
+        # sentences: vector of text to score
+        # pos.words: vector of words of postive sentiment
+        # neg.words: vector of words of negative sentiment
+        # .progress: passed to laply() to control of progress bar
+        
+        # create simple array of scores with laply
+        scores = laply(reviews, function(review, pos.words, neg.words) {
+        
+        # clean up sentences 
+        review <- gsub('[[:punct:]]', '', review)       # Remove punctuaitons
+        review <- gsub('[[:cntrl:]]', '', review)       # Remove control characters, if any
+        review <- gsub('\\d+', '', review)              # Remove digits and spaces
+        review <- tolower(review)    # Convert the text to lower case
+        
+        # split the sentences into words. 
+        word.list = str_split(review, '\\s+')
+        # sometimes a list() is one level of hierarchy too much
+        words = unlist(word.list)
+        
+        # compare our words to the dictionaries of positive & negative terms
+        pos.matches = match(words, pos.words)
+        neg.matches = match(words, neg.words)
+        
+        # The match methods returns a logical array of the matched term or NA
+        # Keep the logical TRUE /FALSE values and discard the NAs
+        pos.matches = !is.na(pos.matches)
+        neg.matches = !is.na(neg.matches)
+        
+        # Get an estimate sentiment score, TRUE/FALSE will be treated as 1/0 by sum():
+        score = sum(pos.matches) - sum(neg.matches)
+        
+        return(score)
+        }, pos.words, neg.words, .progress=.progress )
+        
+        #scores.df = data.frame(score=scores, text=reviews)
+        #return(scores.df)
+        return(scores)
+}
+
+
+```
+
+# Sentiment analysis of user reviews
+In this section we look at yelp user reviews data to know more the data and its attributes. We plot a review trends to know more about the no. of reviews the business has received.
+
+We will deep dive into user reviews to get an estimate sentiment score. We make an estimate of sentiment score for each user review by subtracting the number of occurances of negative words from the positive words.
+
+We will plot a histogram of scores to learn more about the distribution of scores. 
+
+```{r}
+library(dplyr)
+library(zoo)
+library(ggplot2)
+
+filename <- "datayelp/yelp_academic_dataset_review.csv"
+
+data_review_all <- read.csv(filename, 
+                    header = T, stringsAsFactors = F, na.strings = c("","NA"))
+
+# Analyze the data of yelp review dataset
+dim(data_review_all)
+colnames(data_review_all)
+
+# Get some sample rows of the data and summarize the columns
+head(data_review_all)
+tail(data_review_all)
+summary(data_review_all)
+
+# Get a trend for review counts
+# To get a trend of reivew count, we summarize frequency of review by month and year
+data_review_all$date <- as.Date(data_review_all$date, "%Y-%m-%d")
+review_count_data <- data_review_all %>% 
+                        group_by(review_date = as.Date(as.yearmon(date))) %>%
+                        summarise(review_count = n())
+
+# What is the yearly trend of reviews for business.
+# The following creates a yearly trend for reviews
+review_graph <- ggplot( data = review_count_data, aes( x = review_date, y = review_count, 
+                        colour = factor(format(review_date, "%Y") ))) 
+review_graph <- review_graph + geom_line()
+review_graph <- review_graph + labs( title = "Review count yearly trend",
+                                     x = "Review date (year and month)",
+                                     y = "No. of reviews - count")
+review_graph <- review_graph + scale_color_discrete(name="Years")
+review_graph
+
+# Estimate sentiment score for each reivew
+scores <- score.sentiment(data_review_all$text, hu_liu_pos, hu_liu_neg, .progress = "text")
+# Merge the scores with reviews data frame
+data_review_all$scores <- scores
+
+# What is the summary of scores, analyze the min, max, mean and quantile values
+summary(scores)
+
+# Save the scores along with original data.
+# Scores will be used for linear regression analysis
+write.csv(data_review_all, file = filename, row.names = FALSE)
+
+# For memory efficency remove review text from reviews
+#data_review <- subset(data_review_all, select = -c(text, date, user_id, review_id, type))
+
+# A histogram will allow us to see a distribution of the score
+graph_score <- ggplot(data_review_all, aes( x = scores)) + geom_bar(binwidth = 1) 
+graph_score <- graph_score + labs(x = "Sentiment score", y = "Frequency of sentiment score",
+                                  title = "Sentiment score distribution")
+graph_score <- graph_score + theme_bw()
+graph_score
+
+```
+

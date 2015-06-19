@@ -1,0 +1,109 @@
+---
+title: "Data analysis project, checkin analysis for yelp dataset"
+author: "Dimple Sharma"
+date: "Wednesday, December 12, 2014"
+output: pdf_document
+---
+
+# Checkin analysis for yelp dataset
+
+This document contains user checkin analysis. We plot different graphs to analyze check in patterns for a day and for peak hours.
+
+We use time series oject to plot hourly timeseries graph and forecast checkins for next 15 hours.
+
+```{r}
+#setwd("c:/Dimple/RStats/")
+#rm(list=ls())
+library(dplyr)
+library(lubridate)
+library(forecast)
+library(xts)
+library(ggplot2)
+
+checkin_data <- read.csv("datayelp/yelp_academic_dataset_checkin.csv", 
+                         header = T, 
+                         stringsAsFactor = F)
+# Analyze the data
+dim(checkin_data)
+summary(checkin_data)
+head(checkin_data, 2)
+tail(checkin_data, 2)
+
+# Convert all na values to 0
+n <- ncol(checkin_data)
+for(i in 1:n){
+        if(colnames(checkin_data) != "business_id" || colnames(checkin_data) != "type" )
+                checkin_data[is.na(checkin_data[i]), i] <- 0
+}
+
+
+daily <- seq(from = as.POSIXlt("2014-12-06 00:00:00"), 
+             to = as.POSIXlt("2014-12-12 23:00:00"), by = "+1 hour")
+hours <- as.numeric(format(daily, format("%H")))
+total_checkin <- rep( 0, length(daily))
+
+for(i in 1:length(daily)){
+        
+        day <-  daily[i]
+        #day_weekday <- ifelse(wday(day) == 7, 0, wday(day))
+        day_weekday <- wday(day) - 1
+        
+        col_name <- paste("checkin_info.", hours[i], ".", day_weekday, sep = "")
+        #print(col_name)
+        total_checkin[i] <- sum(checkin_data[,which(colnames(checkin_data) == col_name)])
+}
+
+checkin_day_hour <- data.frame(daily, total_checkin)
+
+# Time series and forecast
+par(mar=c(8,4,4,4))
+
+# Create hourly data time series
+ts_data <- xts(checkin_day_hour$total_checkin, order = checkin_day_hour$daily)
+
+# checkin hourly time series plot
+plot(ts_data, las = 2)
+summary(ts_data)
+
+# Auto arima and forecast checkins for next 15 hours
+fit_ts <- auto.arima(ts_data)
+hourly_forecast <- forecast(fit_ts, 15)
+plot(forecast(fit_ts, 15))
+hourly_forecast
+
+# Checkins each day graph
+checkin_day_hour %>% 
+        group_by( weekday=wday(daily)) %>% 
+        summarise( checkins = sum(total_checkin)) %>% 
+        ggplot(aes(x= weekday, y = checkins, fill=factor(weekday))) + 
+        geom_bar(stat="identity") + 
+        labs(title = "Checkins in a day ", x = "Hour of the day", y = "Total checkin") +
+        scale_fill_discrete(name = "Weekdays", 
+             labels = c("Sunday", "Monday", "Tuesday", "Wednesday", 
+                        "Thursday", "Friday", "saturday"))
+
+# Daily hour graph
+checkin_day_hour %>% 
+        group_by( eachhour=hour(daily)) %>% 
+        summarise( checkins = sum(total_checkin)) %>% 
+        ggplot(aes(x= eachhour, y = checkins)) + 
+        geom_point(shape = 1) +
+        labs(title = "Checkins each hour", x = "Hour of the day", y = "Total checkin") +
+        theme_bw()
+
+# peek hours of the day
+checkin_day_hour %>% 
+        group_by( weekday=wday(daily), eachhour=hour(daily)) %>% 
+        summarise( checkins = sum(total_checkin)) %>% 
+        ggplot(aes(x= eachhour, y = checkins,  
+           colour = factor(weekday))) + 
+        geom_point(shape = 1) + 
+        geom_line() +
+        labs(title = "Peak hours of a day", x = "Hour of the day", y = "Total checkin") +
+        scale_color_discrete(name = "Weekday number", 
+                             labels = c("Sunday", "Monday", "Tuesday", "Wednesday", 
+                                "Thursday", "Friday", "saturday"))
+
+```
+
+
